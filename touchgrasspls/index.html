@@ -1,0 +1,620 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flower Collection Game</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #6aa84f;
+            font-family: Arial, sans-serif;
+        }
+        #game-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        img {
+            width: 100%; /* Set desired width */
+            height: auto; /* Automatically adjust height */
+            display: block;
+        }
+        #game-canvas {
+            position: absolute;
+        }
+        #ui-container {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background-color: rgba(255, 255, 255, 0.7);
+            padding: 10px;
+            border-radius: 10px;
+            z-index: 10;
+        }
+        #game-over {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+            display: none;
+            z-index: 20;
+        }
+        #restart-button {
+            margin-top: 15px;
+            padding: 10px 20px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        #restart-button:hover {
+            background-color: #45a049;
+        }
+    </style>
+</head>
+<body>
+    <div id="game-container">
+        <canvas id="game-canvas"></canvas>
+        <div id="ui-container">
+            <div>Score: <span id="score">0</span></div>
+            <div>Lives: <span id="lives">3</span></div>
+            <div>Flowers Collected: <span id="flowers-collected">0</span></div>
+        </div>
+        <div id="game-over">
+            <h2>Game Over</h2>
+            <p>Your final score: <span id="final-score">0</span></p>
+            <p>Total flowers collected: <span id="final-flowers">0</span></p>
+            <button id="restart-button">Play Again</button>
+        </div>
+    </div>
+
+    <script>
+        // Game configuration - MODIFY THESE TO CUSTOMIZE THE GAME
+        const config = {
+            // Image paths - REPLACE THESE WITH YOUR OWN IMAGES
+            images: {
+                girl: 'images/me_touchgrass.PNG', // Placeholder for girl image
+                tree: 'images/tree_touchgrass.PNG', // Placeholder for tree image
+                flowerTypes: [
+                    'images/flower1_touchgrass.PNG', // Placeholder for flower 1
+                    'images/flower3_touchgrass.PNG', // Placeholder for flower 2
+                    'images/flower4_touchgrass.PNG'  // Placeholder for flower 3
+                ],
+                phone: 'images/iphone_touchgrass.PNG', // Placeholder for phone image
+                grass: 'images/grass_touchgrass.PNG' // Placeholder for grass texture
+            },
+            // Game settings
+            playerSpeed: 5,
+            flowerSpawnRate: 0.02, // Chance per frame to spawn a flower
+            phoneSpawnRate: 0.01, // Chance per frame to spawn a phone
+            treeSpawnRate: 0.005, // Chance per frame to spawn a tree
+            maxFlowers: 30,
+            maxPhones: 15,
+            maxTrees: 20,
+            worldSize: 2000, // Size of the game world (a square)
+            cameraFollowSpeed: 0.1 // How quickly the camera follows the player
+        };
+
+        // Game state
+        const state = {
+            canvas: null,
+            ctx: null,
+            player: {
+                x: 0,
+                y: 0,
+                width: 64,
+                height: 64,
+                speed: config.playerSpeed,
+                direction: { x: 0, y: 0 }
+            },
+            camera: {
+                x: 0,
+                y: 0,
+                width: 0,
+                height: 0
+            },
+            flowers: [],
+            phones: [],
+            trees: [],
+            score: 0,
+            flowersCollected: 0,
+            lives: 3,
+            gameOver: false,
+            keys: {
+                ArrowUp: false,
+                ArrowDown: false,
+                ArrowLeft: false,
+                ArrowRight: false
+            },
+            images: {},
+            backgroundPattern: null
+        };
+
+        // Initialize the game
+        function init() {
+            state.canvas = document.getElementById('game-canvas');
+            state.ctx = state.canvas.getContext('2d');
+            
+            // Set canvas size to window size
+            resizeCanvas();
+            window.addEventListener('resize', resizeCanvas);
+            
+            // Center player at start
+            state.player.x = config.worldSize / 2;
+            state.player.y = config.worldSize / 2;
+            
+            // Center camera on player
+            updateCamera();
+            
+            // Load images
+            loadImages().then(() => {
+                // Create background pattern once images are loaded
+                state.backgroundPattern = state.ctx.createPattern(state.images.grass, 'repeat');
+                
+                // Add some initial trees
+                for (let i = 0; i < 10; i++) {
+                    addTree();
+                }
+                
+                // Add some initial flowers
+                for (let i = 0; i < 15; i++) {
+                    addFlower();
+                }
+                
+                // Start the game loop
+                gameLoop();
+            });
+            
+            // Set up event listeners
+            setupEventListeners();
+        }
+
+        // Load all game images
+        function loadImages() {
+            const imagePromises = [];
+            
+            // Load player image
+            const playerPromise = new Promise(resolve => {
+                const img = new Image();
+                img.src = config.images.girl;
+                img.onload = () => {
+                    state.images.girl = img;
+                    resolve();
+                };
+            });
+            imagePromises.push(playerPromise);
+            
+            // Load tree image
+            const treePromise = new Promise(resolve => {
+                const img = new Image();
+                img.src = config.images.tree;
+                img.onload = () => {
+                    state.images.tree = img;
+                    resolve();
+                };
+            });
+            imagePromises.push(treePromise);
+            
+            // Load grass image
+            const grassPromise = new Promise(resolve => {
+                const img = new Image();
+                img.src = config.images.grass;
+                img.onload = () => {
+                    state.images.grass = img;
+                    resolve();
+                };
+            });
+            imagePromises.push(grassPromise);
+            
+            // Load phone image
+            const phonePromise = new Promise(resolve => {
+                const img = new Image();
+                img.src = config.images.phone;
+                img.onload = () => {
+                    state.images.phone = img;
+                    resolve();
+                };
+            });
+            imagePromises.push(phonePromise);
+            
+            // Load flower images
+            state.images.flowers = [];
+            config.images.flowerTypes.forEach((flowerSrc, index) => {
+                const flowerPromise = new Promise(resolve => {
+                    const img = new Image();
+                    img.src = flowerSrc;
+                    img.onload = () => {
+                        state.images.flowers[index] = img;
+                        resolve();
+                    };
+                });
+                imagePromises.push(flowerPromise);
+            });
+            
+            return Promise.all(imagePromises);
+        }
+
+        // Set up keyboard event listeners
+        function setupEventListeners() {
+            window.addEventListener('keydown', (e) => {
+                if (state.keys.hasOwnProperty(e.key)) {
+                    state.keys[e.key] = true;
+                }
+            });
+            
+            window.addEventListener('keyup', (e) => {
+                if (state.keys.hasOwnProperty(e.key)) {
+                    state.keys[e.key] = false;
+                }
+            });
+            
+            document.getElementById('restart-button').addEventListener('click', restartGame);
+        }
+
+        // Resize canvas to window size
+        function resizeCanvas() {
+            state.canvas.width = window.innerWidth;
+            state.canvas.height = window.innerHeight;
+            
+            state.camera.width = state.canvas.width;
+            state.camera.height = state.canvas.height;
+        }
+
+        // Main game loop
+        function gameLoop() {
+            if (!state.gameOver) {
+                update();
+                render();
+                requestAnimationFrame(gameLoop);
+            }
+        }
+
+        // Update game state
+        function update() {
+            // Update player direction based on keys
+            state.player.direction.x = 0;
+            state.player.direction.y = 0;
+            
+            if (state.keys.ArrowUp) state.player.direction.y = -1;
+            if (state.keys.ArrowDown) state.player.direction.y = 1;
+            if (state.keys.ArrowLeft) state.player.direction.x = -1;
+            if (state.keys.ArrowRight) state.player.direction.x = 1;
+            
+            // Normalize diagonal movement
+            if (state.player.direction.x !== 0 && state.player.direction.y !== 0) {
+                const length = Math.sqrt(
+                    state.player.direction.x * state.player.direction.x + 
+                    state.player.direction.y * state.player.direction.y
+                );
+                state.player.direction.x /= length;
+                state.player.direction.y /= length;
+            }
+            
+            // Move player
+            state.player.x += state.player.direction.x * state.player.speed;
+            state.player.y += state.player.direction.y * state.player.speed;
+            
+            // Keep player in bounds
+            state.player.x = Math.max(state.player.width / 2, Math.min(config.worldSize - state.player.width / 2, state.player.x));
+            state.player.y = Math.max(state.player.height / 2, Math.min(config.worldSize - state.player.height / 2, state.player.y));
+            
+            // Update camera position to follow player
+            updateCamera();
+            
+            // Randomly spawn new flowers
+            if (Math.random() < config.flowerSpawnRate && state.flowers.length < config.maxFlowers) {
+                addFlower();
+            }
+            
+            // Randomly spawn new phones
+            if (Math.random() < config.phoneSpawnRate && state.phones.length < config.maxPhones) {
+                addPhone();
+            }
+            
+            // Randomly spawn new trees
+            if (Math.random() < config.treeSpawnRate && state.trees.length < config.maxTrees) {
+                addTree();
+            }
+            
+            // Check for collisions with flowers
+            checkFlowerCollisions();
+            
+            // Check for collisions with phones
+            checkPhoneCollisions();
+            
+            // Move phones toward player
+            movePhones();
+            
+            // Update UI
+            updateUI();
+        }
+
+        // Update camera position to follow player
+        function updateCamera() {
+            // Target camera position
+            const targetX = state.player.x - state.camera.width / 2;
+            const targetY = state.player.y - state.camera.height / 2;
+            
+            // Smoothly move camera toward target
+            state.camera.x += (targetX - state.camera.x) * config.cameraFollowSpeed;
+            state.camera.y += (targetY - state.camera.y) * config.cameraFollowSpeed;
+            
+            // Clamp camera to world bounds
+            state.camera.x = Math.max(0, Math.min(config.worldSize - state.camera.width, state.camera.x));
+            state.camera.y = Math.max(0, Math.min(config.worldSize - state.camera.height, state.camera.y));
+        }
+
+        // Add a new flower at a random position
+        function addFlower() {
+            const flowerType = Math.floor(Math.random() * state.images.flowers.length);
+            const flowerSize = 32;
+            
+            // Position flower in current view plus some margin
+            const margin = 100;
+            const minX = Math.max(margin, state.camera.x - margin);
+            const maxX = Math.min(config.worldSize - margin, state.camera.x + state.camera.width + margin);
+            const minY = Math.max(margin, state.camera.y - margin);
+            const maxY = Math.min(config.worldSize - margin, state.camera.y + state.camera.height + margin);
+            
+            const flower = {
+                x: minX + Math.random() * (maxX - minX),
+                y: minY + Math.random() * (maxY - minY),
+                width: flowerSize,
+                height: flowerSize,
+                type: flowerType
+            };
+            
+            state.flowers.push(flower);
+        }
+
+        // Add a new phone at a random position
+        function addPhone() {
+            const phoneSize = 32;
+            
+            // Position phone at the edge of the screen
+            const side = Math.floor(Math.random() * 4); // 0: top, 1: right, 2: bottom, 3: left
+            let x, y;
+            
+            switch (side) {
+                case 0: // top
+                    x = state.camera.x + Math.random() * state.camera.width;
+                    y = state.camera.y - phoneSize;
+                    break;
+                case 1: // right
+                    x = state.camera.x + state.camera.width + phoneSize;
+                    y = state.camera.y + Math.random() * state.camera.height;
+                    break;
+                case 2: // bottom
+                    x = state.camera.x + Math.random() * state.camera.width;
+                    y = state.camera.y + state.camera.height + phoneSize;
+                    break;
+                case 3: // left
+                    x = state.camera.x - phoneSize;
+                    y = state.camera.y + Math.random() * state.camera.height;
+                    break;
+            }
+            
+            const phone = {
+                x,
+                y,
+                width: phoneSize,
+                height: phoneSize,
+                speed: 1 + Math.random() * 2 // Random speed between 1 and 3
+            };
+            
+            state.phones.push(phone);
+        }
+
+        // Add a new tree at a random position
+        function addTree() {
+            const treeSize = 128;
+            
+            // Position tree in current view plus some margin
+            const margin = 200;
+            const minX = Math.max(margin, state.camera.x - margin);
+            const maxX = Math.min(config.worldSize - margin, state.camera.x + state.camera.width + margin);
+            const minY = Math.max(margin, state.camera.y - margin);
+            const maxY = Math.min(config.worldSize - margin, state.camera.y + state.camera.height + margin);
+            
+            const tree = {
+                x: minX + Math.random() * (maxX - minX),
+                y: minY + Math.random() * (maxY - minY),
+                width: treeSize,
+                height: treeSize
+            };
+            
+            state.trees.push(tree);
+        }
+
+        // Check for collisions with flowers
+        function checkFlowerCollisions() {
+            const playerHitbox = {
+                x: state.player.x - state.player.width / 4,
+                y: state.player.y - state.player.height / 4,
+                width: state.player.width / 2,
+                height: state.player.height / 2
+            };
+            
+            for (let i = state.flowers.length - 1; i >= 0; i--) {
+                const flower = state.flowers[i];
+                if (checkCollision(playerHitbox, flower)) {
+                    // Collect flower
+                    state.flowers.splice(i, 1);
+                    state.score += 10;
+                    state.flowersCollected++;
+                }
+            }
+        }
+
+        // Check for collisions with phones
+        function checkPhoneCollisions() {
+            const playerHitbox = {
+                x: state.player.x - state.player.width / 4,
+                y: state.player.y - state.player.height / 4,
+                width: state.player.width / 2,
+                height: state.player.height / 2
+            };
+            
+            for (let i = state.phones.length - 1; i >= 0; i--) {
+                const phone = state.phones[i];
+                if (checkCollision(playerHitbox, phone)) {
+                    // Hit by phone
+                    state.phones.splice(i, 1);
+                    state.lives--;
+                    
+                    if (state.lives <= 0) {
+                        gameOver();
+                    }
+                }
+            }
+        }
+
+        // Move phones toward player
+        function movePhones() {
+            for (const phone of state.phones) {
+                const dx = state.player.x - phone.x;
+                const dy = state.player.y - phone.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                
+                if (dist > 0) {
+                    phone.x += (dx / dist) * phone.speed;
+                    phone.y += (dy / dist) * phone.speed;
+                }
+            }
+        }
+
+        // Check if two rectangles are colliding
+        function checkCollision(rect1, rect2) {
+            return (
+                rect1.x < rect2.x + rect2.width &&
+                rect1.x + rect1.width > rect2.x &&
+                rect1.y < rect2.y + rect2.height &&
+                rect1.y + rect1.height > rect2.y
+            );
+        }
+
+        // Update UI elements
+        function updateUI() {
+            document.getElementById('score').textContent = state.score;
+            document.getElementById('lives').textContent = state.lives;
+            document.getElementById('flowers-collected').textContent = state.flowersCollected;
+        }
+
+        // Game over function
+        function gameOver() {
+            state.gameOver = true;
+            document.getElementById('final-score').textContent = state.score;
+            document.getElementById('final-flowers').textContent = state.flowersCollected;
+            document.getElementById('game-over').style.display = 'block';
+        }
+
+        // Restart the game
+        function restartGame() {
+            // Reset game state
+            state.player.x = config.worldSize / 2;
+            state.player.y = config.worldSize / 2;
+            state.flowers = [];
+            state.phones = [];
+            state.score = 0;
+            state.flowersCollected = 0;
+            state.lives = 3;
+            state.gameOver = false;
+            
+            // Add initial trees
+            for (let i = 0; i < 10; i++) {
+                addTree();
+            }
+            
+            // Add initial flowers
+            for (let i = 0; i < 15; i++) {
+                addFlower();
+            }
+            
+            // Hide game over screen
+            document.getElementById('game-over').style.display = 'none';
+            
+            // Update UI
+            updateUI();
+            
+            // Restart game loop
+            gameLoop();
+        }
+
+        // Render the game
+        function render() {
+            const ctx = state.ctx;
+            
+            // Clear canvas
+            ctx.clearRect(0, 0, state.canvas.width, state.canvas.height);
+            
+            // Draw grass background pattern
+            ctx.save();
+            ctx.fillStyle = state.backgroundPattern;
+            ctx.fillRect(0, 0, state.canvas.width, state.canvas.height);
+            ctx.restore();
+            
+            // Translate to camera position
+            ctx.save();
+            ctx.translate(-state.camera.x, -state.camera.y);
+            
+            // Draw trees
+            for (const tree of state.trees) {
+                ctx.drawImage(
+                    state.images.tree,
+                    tree.x - tree.width / 2,
+                    tree.y - tree.height / 2,
+                    tree.width,
+                    tree.height
+                );
+            }
+            
+            // Draw flowers
+            for (const flower of state.flowers) {
+                ctx.drawImage(
+                    state.images.flowers[flower.type],
+                    flower.x - flower.width / 2,
+                    flower.y - flower.height / 2,
+                    flower.width,
+                    flower.height
+                );
+            }
+            
+            // Draw phones
+            for (const phone of state.phones) {
+                ctx.drawImage(
+                    state.images.phone,
+                    phone.x - phone.width / 2,
+                    phone.y - phone.height / 2,
+                    phone.width,
+                    phone.height
+                );
+            }
+            
+            // Draw player
+            ctx.drawImage(
+                state.images.girl,
+                state.player.x - state.player.width / 2,
+                state.player.y - state.player.height / 2,
+                state.player.width,
+                state.player.height
+            );
+            
+            ctx.restore();
+        }
+
+        // Start the game
+        window.onload = init;
+    </script>
+</body>
+</html>
